@@ -193,4 +193,7 @@ Arduino 自动检测，若未找到则仅投影文字，不触发气动装置。
 
 ---
 
-© 2026 Yijie Ding. All rights reserved.
+© 2026 Yijie Ding, Ting Shen, [Name 3]. All rights reserved.
+Code by Yijie Ding. Concept by Yijie Ding, Ting Shen, [Name 3].
+For viewing purposes only. Not for reuse or distribution.
+
