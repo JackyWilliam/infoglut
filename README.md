@@ -194,4 +194,5 @@ Drag the blue control points in the editor overlay to warp the projected image t
 ---
 
 © 2026 Yijie Ding. All rights reserved.
+For viewing purposes only. Not for reuse or distribution.
 
