@@ -193,6 +193,7 @@ Drag the blue control points in the editor overlay to warp the projected image t
 
 ---
 
-© 2026 Yijie Ding. All rights reserved.
+© 2026 Yijie Ding, Ting Shen, [Name 3]. All rights reserved.                                                                                 
+  Code by Yijie Ding. Concept by Yijie Ding, Ting Shen, [Name 3].
 For viewing purposes only. Not for reuse or distribution.
 
