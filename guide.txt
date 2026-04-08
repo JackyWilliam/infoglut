@@ -1,0 +1,32 @@
+启动方式
+--------
+
+一键启动（首次需先在终端执行一次）：
+    chmod +x start.sh
+之后直接双击 start.sh 即可。
+
+或手动分别启动：
+
+# 终端 1 — 投影仪 1
+python3 projector.py 12345
+
+# 终端 2 — 投影仪 2
+python3 projector.py 12346
+
+# 终端 3 — 服务器
+python3 server.py
+
+# 终端 4 — Cloudflare 隧道 + 自动生成二维码
+python3 tunnel_qr.py
+
+
+投影仪快捷键
+------------
+
+F        切换全屏 / 窗口
+C        显示 / 隐藏编辑器 overlay
+S        打印当前控制点坐标到终端
+H        水平镜像
+V        垂直镜像
+[ / ]    增大 / 减小条带宽度（越小越精细，越吃 CPU）
+ESC      退出
