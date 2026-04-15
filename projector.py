@@ -33,6 +33,22 @@ info = pygame.display.Info()
 SCREEN_W = info.current_w
 SCREEN_H = info.current_h
 
+# Retina HiDPI：用 CoreGraphics 读取实际物理像素（无需额外依赖）
+try:
+    import ctypes
+    _cg = ctypes.cdll.LoadLibrary('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')
+    _cg.CGMainDisplayID.restype = ctypes.c_uint32
+    _cg.CGDisplayPixelsWide.restype = ctypes.c_size_t
+    _cg.CGDisplayPixelsWide.argtypes = [ctypes.c_uint32]
+    _cg.CGDisplayPixelsHigh.restype = ctypes.c_size_t
+    _cg.CGDisplayPixelsHigh.argtypes = [ctypes.c_uint32]
+    _display = _cg.CGMainDisplayID()
+    SCREEN_W = int(_cg.CGDisplayPixelsWide(_display))
+    SCREEN_H = int(_cg.CGDisplayPixelsHigh(_display))
+    print(f"[HiDPI] CoreGraphics render resolution={SCREEN_W}x{SCREEN_H}")
+except Exception as e:
+    print(f"[HiDPI] CoreGraphics unavailable ({e}), using {SCREEN_W}x{SCREEN_H}")
+
 if USE_FULLSCREEN:
     screen = pygame.display.set_mode((SCREEN_W, SCREEN_H), pygame.FULLSCREEN)
 else:
@@ -44,10 +60,11 @@ pygame.display.set_caption("Infoglut Projector - CPU Warp Stable")
 clock = pygame.time.Clock()
 
 # =========================
-# 内容画布
+# 内容画布（2x 超采样：以双倍分辨率渲染，warp 时缩回屏幕尺寸，提升清晰度）
 # =========================
-CONTENT_W = SCREEN_W
-CONTENT_H = SCREEN_H
+SUPERSAMPLE = 2
+CONTENT_W = SCREEN_W * SUPERSAMPLE
+CONTENT_H = SCREEN_H * SUPERSAMPLE
 CONTENT_SCALE = CONTENT_W / 1024  # 字体/间距缩放系数
 content_surface = pygame.Surface((CONTENT_W, CONTENT_H), pygame.SRCALPHA)
 
@@ -467,10 +484,12 @@ def draw_warped_content_cpu():
                 continue
 
             src_strip = content_surface.subsurface((src_x, sy0, src_w, seg_src_h))
-            dst_strip = pygame.transform.smoothscale(src_strip, (max(1, src_w + overlap), dest_h))
+            # 超采样：目标宽度缩回屏幕坐标（除以 SUPERSAMPLE）
+            dest_w = max(1, src_w // SUPERSAMPLE + overlap)
+            dst_strip = pygame.transform.smoothscale(src_strip, (dest_w, dest_h))
 
             # 取两端 x 的均值作为条带中心，体现左右弯曲
-            dest_x = int((p0[0] + p1[0]) / 2 - src_w / 2)
+            dest_x = int((p0[0] + p1[0]) / 2 - dest_w / 2)
             dest_y = int(min(p0[1], p1[1]))
 
             screen.blit(dst_strip, (dest_x, dest_y))

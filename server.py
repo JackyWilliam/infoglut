@@ -1,5 +1,6 @@
 from flask import Flask, request, render_template_string, jsonify
 import socket
+import sys
 import serial
 import time
 import threading
@@ -44,10 +45,11 @@ arduino = None
 arduino_lock = threading.Lock()
 
 # =========================
-# UDP 配置（发送给两个 projector.py 实例）
+# UDP 配置（端口数量由命令行参数决定，默认2个）
 # =========================
 UDP_IP = "127.0.0.1"
-PROJECTOR_PORTS = [12345, 12346]
+_proj_count = int(sys.argv[1]) if len(sys.argv) > 1 else 2
+PROJECTOR_PORTS = [12345] if _proj_count == 1 else [12345, 12346]
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 # =========================
