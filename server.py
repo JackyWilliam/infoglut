@@ -70,10 +70,29 @@ CUSTOM_HARM_WORDS = [
 ]
 
 # =========================
-# AI 小方框最新内容
+# AI 小方框最新内容 + 情感
 # =========================
 latest_ai_text = "..."
+latest_ai_mood = "numb"
 latest_ai_lock = threading.Lock()
+
+ALLOWED_MOODS = {
+    "numb", "tired", "sad", "anxious",
+    "angry", "amused", "curious", "disgusted",
+}
+DEFAULT_MOOD = "numb"
+
+# =========================
+# 气量状态（0.0 ~ 1.0）
+# 由 PUMP 累加、VALVE 衰减、自然漏气慢慢回到 0
+# =========================
+air_level = 0.0
+air_lock = threading.Lock()
+
+PUMP_FULL_MS = 30000          # 累计 PUMP 多少 ms 把屏幕从空充满（拉大 = 屏幕膨胀更慢，匹配气球物理速度）
+VALVE_FULL_MS = 80000         # 累计 VALVE 多少 ms 把屏幕从满放空（缩屏比 PUMP 膨胀略小一点）
+NATURAL_LEAK_PER_SEC = 0.0    # 气球本身不漏；屏幕只在脏话/idle 自动放气时缩
+AIR_BROADCAST_INTERVAL = 0.2  # 广播周期（秒）
 
 HTML_PAGE = """
 <!DOCTYPE html>
@@ -81,159 +100,267 @@ HTML_PAGE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Infoglut Interactive</title>
+    <title>INFOGLUT</title>
     <style>
-        body {
-            background-color: #000;
+        * { box-sizing: border-box; }
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
             color: #fff;
-            font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+            font-family: "SF Mono", "JetBrains Mono", "Menlo", "Consolas", monospace;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none;
+        }
+        /* iOS：input 必须显式允许选中/输入，否则 user-select:none 父级会让它失焦 */
+        input, textarea, button {
+            user-select: text;
+            -webkit-user-select: text;
+            touch-action: manipulation;
+        }
+        button {
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        body {
+            background-image: radial-gradient(ellipse at center, #0a0a0a 0%, #000 70%);
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
-            height: 100vh;
-            margin: 0;
-            overflow: hidden;
+            justify-content: space-between;
+            padding: 56px 24px 40px;
         }
+        /* 极弱 SVG 噪点：信息粒子感 */
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.6'/></svg>");
+            opacity: 0.05;
+            mix-blend-mode: screen;
+            z-index: 1;
+        }
+
+        .top, .mid, .bottom {
+            position: relative;
+            z-index: 2;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
         .logo {
-            font-size: 28px;
-            font-weight: bold;
-            letter-spacing: 6px;
-            margin-bottom: 50px;
-            color: #aaa;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 10px;
+            color: #888;
+            margin-bottom: 10px;
         }
-        input {
-            width: 80%;
-            max-width: 320px;
-            padding: 18px 24px;
-            font-size: 20px;
-            border-radius: 16px;
-            border: 1px solid #333;
-            background-color: #111;
-            color: white;
+        .sub {
+            font-size: 10px;
+            letter-spacing: 3px;
+            color: #3a3a3a;
+            text-transform: uppercase;
+        }
+
+        .mid {
+            max-width: 360px;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 16px 0;
+            font-size: 18px;
+            color: #fff;
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid #2a2a2a;
             text-align: center;
             outline: none;
-            margin-bottom: 30px;
-            transition: all 0.3s ease;
+            font-family: inherit;
+            transition: border-color 250ms ease;
+            caret-color: #fff;
         }
-        input:focus {
-            border-color: #888;
-            background-color: #1a1a1a;
+        input[type="text"]:focus {
+            border-bottom-color: #ddd;
         }
         input::placeholder {
-            color: #555;
+            color: #2f2f2f;
+            letter-spacing: 1px;
         }
+
         button {
-            background-color: #fff;
+            margin-top: 22px;
+            width: 100%;
+            background: #fff;
             color: #000;
-            padding: 18px 48px;
-            font-size: 18px;
+            padding: 14px 0;
+            font-size: 13px;
             font-weight: 600;
-            border-radius: 16px;
+            letter-spacing: 6px;
             border: none;
             cursor: pointer;
-            transition: transform 0.1s, opacity 0.3s;
+            font-family: inherit;
+            text-transform: uppercase;
+            transition: opacity 200ms ease, transform 80ms ease;
         }
         button:active {
-            transform: scale(0.96);
+            transform: scale(0.985);
         }
         button:disabled {
-            opacity: 0.5;
+            opacity: 0.3;
             cursor: not-allowed;
         }
 
         #aiBox {
-            margin-top: 28px;
-            width: 80%;
-            max-width: 420px;
-            min-height: 88px;
-            padding: 16px 18px;
-            border-radius: 10px;
-            border: 1px solid #1f3552;
-            background-color: #05080d;
-            color: #9ec5ff;
-            box-shadow: inset 0 0 12px rgba(80, 140, 255, 0.08);
-            box-sizing: border-box;
-            text-align: left;
+            width: 100%;
+            max-width: 440px;
+            min-height: 180px;
+            padding: 22px 0 8px;
+            border-top: 1px solid #161616;
+            text-align: center;
         }
-
         .ai-label {
-            font-size: 12px;
-            letter-spacing: 2px;
-            color: #666;
-            margin-bottom: 10px;
+            font-size: 10px;
+            letter-spacing: 6px;
+            color: #3a3a3a;
+            margin-bottom: 18px;
+            text-transform: uppercase;
+            transition: color 600ms ease;
         }
-
         #aiText {
-            font-size: 16px;
-            line-height: 1.5;
-            color: #6fa8ff;
+            font-size: 26px;
+            line-height: 1.45;
+            color: #b8b8b8;
+            letter-spacing: 0.4px;
+            min-height: 38px;
             word-break: break-word;
-            min-height: 24px;
+            opacity: 0.95;
+            transition: opacity 350ms ease, color 600ms ease;
+        }
+        #aiText.refresh {
+            opacity: 0;
+        }
+        /* mood → 颜色 */
+        body.mood-numb       #aiText { color: #b8b8b8; }
+        body.mood-tired      #aiText { color: #8a8aa0; }
+        body.mood-sad        #aiText { color: #6f9eff; }
+        body.mood-anxious    #aiText { color: #ff9c50; }
+        body.mood-angry      #aiText { color: #ff5252; }
+        body.mood-amused     #aiText { color: #f5d76e; }
+        body.mood-curious    #aiText { color: #c490ff; }
+        body.mood-disgusted  #aiText { color: #9bb84a; }
+        /* mood label 同色但暗 */
+        body.mood-numb       .ai-label { color: #555; }
+        body.mood-tired      .ai-label { color: #555568; }
+        body.mood-sad        .ai-label { color: #3d5a96; }
+        body.mood-anxious    .ai-label { color: #8a5530; }
+        body.mood-angry      .ai-label { color: #8a3030; }
+        body.mood-amused     .ai-label { color: #8a7838; }
+        body.mood-curious    .ai-label { color: #6a4f8a; }
+        body.mood-disgusted  .ai-label { color: #5a6a30; }
+        /* 闪烁光标，呼应"还在想" */
+        #aiText::after {
+            content: "_";
+            color: #555;
+            margin-left: 4px;
+            animation: blink 1.1s steps(1) infinite;
+        }
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            50.01%, 100% { opacity: 0; }
         }
     </style>
 </head>
 <body>
-    <div class="logo">INFOGLUT</div>
-    <input type="text" id="msg" placeholder="Type your message..." autocomplete="off">
-    <button id="sendBtn" onclick="sendData()">Send</button>
+    <div class="top">
+        <div class="logo">INFOGLUT</div>
+        <div class="sub">say something. anything.</div>
+    </div>
 
-    <div id="aiBox">
-        <div class="ai-label">THOUGHT</div>
-        <div id="aiText">...</div>
+    <div class="mid">
+        <input type="text" id="msg" placeholder="..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+        <button id="sendBtn" onclick="sendData()">SEND</button>
+    </div>
+
+    <div class="bottom">
+        <div id="aiBox">
+            <div class="ai-label" id="aiLabel">THOUGHT</div>
+            <div id="aiText">...</div>
+        </div>
     </div>
 
     <script>
+        const aiTextEl = document.getElementById('aiText');
+        const aiLabelEl = document.getElementById('aiLabel');
+        let lastAiText = "";
+        let lastMood = "numb";
+        document.body.classList.add("mood-numb");
+
         function sendData() {
-            let input = document.getElementById('msg');
-            let btn = document.getElementById('sendBtn');
-            let text = input.value.trim();
+            const input = document.getElementById('msg');
+            const btn = document.getElementById('sendBtn');
+            const text = input.value.trim();
             if (!text) return;
 
             btn.disabled = true;
-            let originalText = btn.innerText;
-            btn.innerText = "Sending...";
+            const original = btn.innerText;
+            btn.innerText = "···";
 
             fetch('/send', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/x-www-form-urlencoded'},
                 body: 'message=' + encodeURIComponent(text)
-            }).then(async (res) => {
-                const data = await res.json();
-
+            }).then(() => {
                 input.value = '';
-
-                if (data.arduino_connected) {
-                    btn.innerText = "Sent!";
-                } else {
-                    btn.innerText = "No Arduino";
-                }
-
+                btn.innerText = "OK";
                 setTimeout(() => {
-                    btn.innerText = originalText;
+                    btn.innerText = original;
                     btn.disabled = false;
-                }, 1500);
-            }).catch(err => {
-                btn.innerText = "Error";
+                }, 700);
+            }).catch(() => {
+                btn.innerText = "RETRY";
                 setTimeout(() => {
-                    btn.innerText = originalText;
+                    btn.innerText = original;
                     btn.disabled = false;
-                }, 1500);
+                }, 1200);
             });
+        }
+
+        const ALL_MOODS = ["numb","tired","sad","anxious","angry","amused","curious","disgusted"];
+
+        function applyMood(mood) {
+            const m = ALL_MOODS.includes(mood) ? mood : "numb";
+            if (m === lastMood) return;
+            ALL_MOODS.forEach(x => document.body.classList.remove("mood-" + x));
+            document.body.classList.add("mood-" + m);
+            aiLabelEl.innerText = m.toUpperCase();
+            lastMood = m;
         }
 
         function refreshAIText() {
             fetch('/ai_latest')
                 .then(res => res.json())
                 .then(data => {
-                    const aiTextEl = document.getElementById('aiText');
-                    if (aiTextEl && data.text !== undefined) {
-                        aiTextEl.innerText = data.text;
-                    }
+                    if (data.text === undefined) return;
+                    const newMood = data.mood || "numb";
+                    if (data.text === lastAiText && newMood === lastMood) return;
+                    lastAiText = data.text;
+                    aiTextEl.classList.add('refresh');
+                    setTimeout(() => {
+                        aiTextEl.innerText = data.text || "...";
+                        applyMood(newMood);
+                        aiTextEl.classList.remove('refresh');
+                    }, 350);
                 })
-                .catch(err => {
-                    console.log("AI text fetch error:", err);
-                });
+                .catch(() => {});
         }
 
         document.addEventListener("DOMContentLoaded", function () {
@@ -243,9 +370,8 @@ HTML_PAGE = """
                     sendData();
                 }
             });
-
             refreshAIText();
-            setInterval(refreshAIText, 1200);
+            setInterval(refreshAIText, 1500);
         });
     </script>
 </body>
@@ -300,15 +426,43 @@ def sdk_detect_harmful_text(text: str) -> bool:
     return False
 
 
-def set_latest_ai_text(text: str):
-    global latest_ai_text
+def set_latest_ai(text: str, mood: str):
+    global latest_ai_text, latest_ai_mood
     with latest_ai_lock:
         latest_ai_text = text
+        latest_ai_mood = mood if mood in ALLOWED_MOODS else DEFAULT_MOOD
 
 
-def get_latest_ai_text():
+def get_latest_ai():
     with latest_ai_lock:
-        return latest_ai_text
+        return latest_ai_text, latest_ai_mood
+
+
+def add_air(duration_ms: int):
+    global air_level
+    with air_lock:
+        air_level = min(1.0, air_level + duration_ms / PUMP_FULL_MS)
+
+
+def release_air(duration_ms: int):
+    global air_level
+    with air_lock:
+        air_level = max(0.0, air_level - duration_ms / VALVE_FULL_MS)
+
+
+def get_air_level() -> float:
+    with air_lock:
+        return air_level
+
+
+def air_loop():
+    global air_level
+    while True:
+        time.sleep(AIR_BROADCAST_INTERVAL)
+        with air_lock:
+            air_level = max(0.0, air_level - NATURAL_LEAK_PER_SEC * AIR_BROADCAST_INTERVAL)
+            level = air_level
+        send_to_all_projectors(f"AIR::{level:.4f}")
 
 
 def connect_arduino():
@@ -391,24 +545,27 @@ def send_to_arduino(command: str) -> bool:
             return False
 
 
-def generate_ai_text(user_text: str) -> str:
+def generate_ai_text(user_text: str):
+    """Returns (text, mood)."""
     if not client:
-        return "I kept thinking about that."
+        return ("whatever", DEFAULT_MOOD)
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        "You've seen too much online and you can't stop reacting. "
-                        "When someone says something, you just blurt out the first thing that comes to mind — "
-                        "direct, blunt, casual. "
-                        "Reply with one short reaction: specific, under 10 words. "
-                        "Mostly just honest and unfiltered. Swear only rarely, when it really fits. "
-                        "No poetic bullshit. No full sentences needed. "
-                        "Just the raw reaction."
+                        "You're someone whose brain has been melted by endless scrolling. "
+                        "Each time someone speaks, you blurt out a short fragment that loosely relates, "
+                        "along with the emotional color of that fragment.\n\n"
+                        "Output format (exactly two lines, nothing else):\n"
+                        "<mood>\n"
+                        "<fragment>\n\n"
+                        "<mood> is one word, picked from: numb, tired, sad, anxious, angry, amused, curious, disgusted.\n"
+                        "<fragment> is 1-6 English words. No emoji, no quotes, no end punctuation.\n\n"
+                        "Stay loosely on topic. Don't fully answer, don't comfort, don't summarize, don't make a point."
                     )
                 },
                 {
@@ -416,37 +573,48 @@ def generate_ai_text(user_text: str) -> str:
                     "content": user_text
                 }
             ],
-            max_tokens=25,
+            max_tokens=20,
             temperature=1.1
         )
 
-        ai_text = response.choices[0].message.content.strip()
-        ai_text = ai_text.replace("\\n", " ").strip()
+        raw = response.choices[0].message.content.strip()
+        lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
 
-        if not ai_text:
-            return "I kept thinking about that."
+        if len(lines) >= 2:
+            mood = lines[0].lower().strip(" .:-")
+            text = lines[1].strip(" \"'")
+        elif len(lines) == 1:
+            mood = DEFAULT_MOOD
+            text = lines[0].strip(" \"'")
+        else:
+            return ("whatever", DEFAULT_MOOD)
 
-        return ai_text
+        if mood not in ALLOWED_MOODS:
+            mood = DEFAULT_MOOD
+        if not text:
+            text = "whatever"
+
+        return (text, mood)
 
     except Exception as e:
         print(f"OpenAI 生成失败: {e}")
-        return "I kept thinking about that."
+        return ("whatever", DEFAULT_MOOD)
 
 
 def trigger_ai_once_from_message(user_msg: str, trigger_pump: bool = True):
     def worker():
         time.sleep(1.0)  # 稍微停一下，更像"想了一下"
 
-        ai_text = generate_ai_text(user_msg)
-        set_latest_ai_text(ai_text)
+        ai_text, ai_mood = generate_ai_text(user_msg)
+        set_latest_ai(ai_text, ai_mood)
 
-        print(f"[AI] {ai_text}")
+        print(f"[AI] {ai_mood} :: {ai_text}")
 
-        send_to_all_projectors(f"AI::{ai_text}")
+        send_to_all_projectors(f"AI::{ai_mood}::{ai_text}")
 
         if trigger_pump:
-            duration = get_pump_duration(ai_text)
-            send_to_arduino(f"PUMP:{duration}\n")
+            send_to_arduino("PUMP:300\n")
+            add_air(300)
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -458,8 +626,10 @@ def index():
 
 @app.route('/ai_latest', methods=['GET'])
 def ai_latest():
+    text, mood = get_latest_ai()
     return jsonify({
-        "text": get_latest_ai_text()
+        "text": text,
+        "mood": mood,
     })
 
 
@@ -483,6 +653,7 @@ def send():
         print("检测到脏话/伤害性语言")
         send_to_random_projector(f"BAD::{msg}")
         arduino_ok = send_to_arduino(f"VALVE:{duration}\n")
+        release_air(duration)
 
         trigger_ai_once_from_message(msg, trigger_pump=False)
 
@@ -496,6 +667,7 @@ def send():
     duration = get_pump_duration(msg)
     send_to_random_projector(f"NORMAL::{msg}")
     arduino_ok = send_to_arduino(f"PUMP:{duration}\n")
+    add_air(duration)
 
     # 每条用户消息后，AI 只触发一次
     trigger_ai_once_from_message(msg)
@@ -537,6 +709,7 @@ def idle_valve_loop():
         duration = random.randint(1000, 2000)
         print(f"[自动放气] 静默释放 {duration}ms")
         send_to_arduino(f"VALVE:{duration}\n")
+        release_air(duration)
 
 
 if __name__ == '__main__':
@@ -547,5 +720,8 @@ if __name__ == '__main__':
 
     # 3小时展览计时，自动偶发放气
     threading.Thread(target=idle_valve_loop, daemon=True).start()
+
+    # 气量广播：每 200ms 衰减 + UDP 广播 air_level 给 projector
+    threading.Thread(target=air_loop, daemon=True).start()
 
     app.run(host='0.0.0.0', port=8080)

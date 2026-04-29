@@ -109,8 +109,29 @@ V_SEGS = 4
 MAX_TEXTS = 30
 texts = []
 latest_ai_text = "..."
+latest_ai_mood = "numb"
 latest_ai_lock = threading.Lock()
 message_queue = queue.Queue()
+
+# 情感 → 颜色（与前端保持一致）
+MOOD_COLORS = {
+    "numb":      (170, 170, 170),
+    "tired":     (138, 138, 160),
+    "sad":       (111, 158, 255),
+    "anxious":   (255, 156,  80),
+    "angry":     (255,  82,  82),
+    "amused":    (245, 215, 110),
+    "curious":   (196, 144, 255),
+    "disgusted": (155, 184,  74),
+}
+
+# =========================
+# 气量同步（来自 server 的 AIR:: 广播）
+# 用户调好的 control_points 是 air=0 时的最小形状；气越多形状越向外膨胀
+# =========================
+air_level = 0.0
+AIR_MIN_SCALE = 1.0  # air=0 时（瘪气球）—— 用户调好的基准形状
+AIR_MAX_SCALE = 1.5  # air=1 时（满气球）—— 向中心反向膨胀 1.5x
 
 # =========================
 # 字体
@@ -135,16 +156,37 @@ def clamp(v, lo, hi):
 def distance(p1, p2):
     return math.hypot(p1[0] - p2[0], p1[1] - p2[1])
 
+
+def set_air_level(level: float):
+    global air_level
+    air_level = max(0.0, min(1.0, level))
+
+
+def get_scaled_control_point(name: str):
+    base = control_points[name]
+    cx = SCREEN_W * 0.5
+    cy = SCREEN_H * 0.5
+    s = AIR_MIN_SCALE + (AIR_MAX_SCALE - AIR_MIN_SCALE) * air_level
+    return [cx + (base[0] - cx) * s, cy + (base[1] - cy) * s]
+
+
 def surface_map(u, v):
-    cp = control_points
-    top    = quadratic_bezier(cp["TL"], cp["TC"], cp["TR"], u)
-    bottom = quadratic_bezier(cp["BL"], cp["BC"], cp["BR"], u)
-    left   = quadratic_bezier(cp["TL"], cp["LC"], cp["BL"], v)
-    right  = quadratic_bezier(cp["TR"], cp["RC"], cp["BR"], v)
-    tl = np.array(cp["TL"], dtype=np.float32)
-    tr = np.array(cp["TR"], dtype=np.float32)
-    bl = np.array(cp["BL"], dtype=np.float32)
-    br = np.array(cp["BR"], dtype=np.float32)
+    TL = get_scaled_control_point("TL")
+    TR = get_scaled_control_point("TR")
+    BL = get_scaled_control_point("BL")
+    BR = get_scaled_control_point("BR")
+    TC = get_scaled_control_point("TC")
+    BC = get_scaled_control_point("BC")
+    LC = get_scaled_control_point("LC")
+    RC = get_scaled_control_point("RC")
+    top    = quadratic_bezier(TL, TC, TR, u)
+    bottom = quadratic_bezier(BL, BC, BR, u)
+    left   = quadratic_bezier(TL, LC, BL, v)
+    right  = quadratic_bezier(TR, RC, BR, v)
+    tl = np.array(TL, dtype=np.float32)
+    tr = np.array(TR, dtype=np.float32)
+    bl = np.array(BL, dtype=np.float32)
+    br = np.array(BR, dtype=np.float32)
     bilinear = tl * (1-u) * (1-v) + tr * u * (1-v) + bl * (1-u) * v + br * u * v
     return top * (1-v) + bottom * v + left * (1-u) + right * u - bilinear
 
@@ -210,14 +252,23 @@ def print_control_points():
         print(f'    "{k}": [{int(p[0])}, {int(p[1])}],')
     print("}")
 
-def set_latest_ai_text(text):
-    global latest_ai_text
+def set_latest_ai_text(text, mood="numb"):
+    global latest_ai_text, latest_ai_mood
     with latest_ai_lock:
         latest_ai_text = text
+        latest_ai_mood = mood if mood in MOOD_COLORS else "numb"
 
 def get_latest_ai_text():
     with latest_ai_lock:
         return latest_ai_text
+
+def get_latest_ai_mood():
+    with latest_ai_lock:
+        return latest_ai_mood
+
+def get_latest_ai_color():
+    with latest_ai_lock:
+        return MOOD_COLORS.get(latest_ai_mood, MOOD_COLORS["numb"])
 
 def rects_overlap(r1, r2, padding=10):
     x1, y1, w1, h1 = r1
@@ -264,10 +315,23 @@ def udp_listener():
         try:
             data, _ = sock.recvfrom(4096)
             msg = data.decode("utf-8", errors="ignore").strip()
+
+            if msg.startswith("AIR::"):
+                try:
+                    set_air_level(float(msg[5:].strip()))
+                except ValueError:
+                    pass
+                continue
+
             print("[UDP]", msg)
 
             if msg.startswith("AI::"):
-                set_latest_ai_text(msg[4:].strip())
+                payload = msg[4:].strip()
+                if "::" in payload:
+                    mood_part, text_part = payload.split("::", 1)
+                    set_latest_ai_text(text_part.strip(), mood_part.strip().lower())
+                else:
+                    set_latest_ai_text(payload, "numb")
 
             elif msg.startswith("BAD::"):
                 content = msg[5:].strip()
@@ -426,7 +490,7 @@ def draw_content_surface():
         content_surface,
         get_latest_ai_text() if get_latest_ai_text() else "...",
         text_font,
-        (111, 168, 255),
+        get_latest_ai_color(),
         (ai_x + 12, ai_y + 28, ai_w - 24, ai_h - 38),
         line_spacing=4,
         align_center=False
@@ -498,22 +562,30 @@ def draw_warped_content_cpu():
     mask_surface = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
     mask_surface.fill((0, 0, 0, 255))
 
+    TL_s = get_scaled_control_point("TL")
+    TR_s = get_scaled_control_point("TR")
+    BL_s = get_scaled_control_point("BL")
+    BR_s = get_scaled_control_point("BR")
+    TC_s = get_scaled_control_point("TC")
+    BC_s = get_scaled_control_point("BC")
+    LC_s = get_scaled_control_point("LC")
+    RC_s = get_scaled_control_point("RC")
     polygon_points = []
     for i in range(61):
         u = i / 60.0
-        p = quadratic_bezier(control_points["TL"], control_points["TC"], control_points["TR"], u)
+        p = quadratic_bezier(TL_s, TC_s, TR_s, u)
         polygon_points.append((int(p[0]), int(p[1])))
     for i in range(61):
         v = i / 60.0
-        p = quadratic_bezier(control_points["TR"], control_points["RC"], control_points["BR"], v)
+        p = quadratic_bezier(TR_s, RC_s, BR_s, v)
         polygon_points.append((int(p[0]), int(p[1])))
     for i in range(60, -1, -1):
         u = i / 60.0
-        p = quadratic_bezier(control_points["BL"], control_points["BC"], control_points["BR"], u)
+        p = quadratic_bezier(BL_s, BC_s, BR_s, u)
         polygon_points.append((int(p[0]), int(p[1])))
     for i in range(60, -1, -1):
         v = i / 60.0
-        p = quadratic_bezier(control_points["TL"], control_points["LC"], control_points["BL"], v)
+        p = quadratic_bezier(TL_s, LC_s, BL_s, v)
         polygon_points.append((int(p[0]), int(p[1])))
 
     pygame.draw.polygon(mask_surface, (0, 0, 0, 0), polygon_points)
@@ -540,9 +612,12 @@ def draw_editor_overlay():
     # 4条边曲线
     def draw_quad_bezier_curve(p0_name, p1_name, p2_name, steps):
         pts = []
+        p0 = get_scaled_control_point(p0_name)
+        p1 = get_scaled_control_point(p1_name)
+        p2 = get_scaled_control_point(p2_name)
         for i in range(steps + 1):
             t = i / steps
-            p = quadratic_bezier(control_points[p0_name], control_points[p1_name], control_points[p2_name], t)
+            p = quadratic_bezier(p0, p1, p2, t)
             pts.append((int(p[0]), int(p[1])))
         pygame.draw.lines(screen, blue, False, pts, 2)
 

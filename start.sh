@@ -33,7 +33,7 @@ tell application "Terminal"
     do script "cd \"$DIR\" && python3 projector.py 12345"
     do script "cd \"$DIR\" && python3 projector.py 12346"
     do script "cd \"$DIR\" && python3 server.py 2"
-    do script "cd \"$DIR\" && python3 tunnel_qr.py"
+    do script "cd \"$DIR\" && cloudflared --config .cloudflared/config.yml tunnel run"
 end tell
 EOF
 else
@@ -41,7 +41,7 @@ else
 tell application "Terminal"
     do script "cd \"$DIR\" && python3 projector.py 12345"
     do script "cd \"$DIR\" && python3 server.py 1"
-    do script "cd \"$DIR\" && python3 tunnel_qr.py"
+    do script "cd \"$DIR\" && cloudflared --config .cloudflared/config.yml tunnel run"
 end tell
 EOF
 fi
