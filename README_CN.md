@@ -11,7 +11,7 @@
                                          ↓
                                      Arduino（气泵 / 阀门）
                                          ↓
-                                     AI 反应 (GPT-4o-mini)
+                                     AI 反应 (GPT-4o)
 ```
 
 - **server.py** — Flask Web 服务器（端口 8080）。接收观众文字，判断是否有害，通过 UDP 发送给两台投影仪，触发 Arduino，并调用 AI 生成反应。
@@ -76,7 +76,7 @@ pip install flask pygame-ce numpy pyserial openai python-dotenv safetext
 | `pygame-ce` | 投影仪渲染（社区版） |
 | `numpy` | Coons patch 曲面数学计算 |
 | `pyserial` | Arduino 串口通信 |
-| `openai` | GPT-4o-mini AI 反应生成 |
+| `openai` | GPT-4o AI 反应生成 |
 | `python-dotenv` | 读取 `.env` 配置文件 |
 | `safetext` | 英文脏话检测 |
 
@@ -189,7 +189,7 @@ Arduino 自动检测，若未找到则仅投影文字，不触发气动装置。
 
 - **普通消息** → 白色浮动文字随机出现在某台投影仪上，气泵脉冲（时长随消息长度变化）
 - **有害消息** → 红色抖动文字 + 阀门放气（消息越长放气越久）
-- **AI 反应** → GPT-4o-mini 生成简短直接的回应，显示在两台投影仪的「THOUGHT」框中
+- **AI 反应** → GPT-4o 生成简短直接的回应，显示在两台投影仪的「THOUGHT」框中
 
 ---
 

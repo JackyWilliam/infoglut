@@ -11,7 +11,7 @@ Audience (phone) → Flask Server (server.py) → UDP → Projector × 2 (projec
                                              ↓
                                          Arduino (pump / valve)
                                              ↓
-                                         AI thought (GPT-4o-mini)
+                                         AI thought (GPT-4o)
 ```
 
 - **server.py** — Flask web server (port 8080). Receives audience text, classifies it (normal / harmful), sends UDP messages to both projectors, triggers the Arduino, and generates an AI reaction.
@@ -76,7 +76,7 @@ Key packages:
 | `pygame-ce` | Projector rendering (community edition) |
 | `numpy` | Coons-patch surface math |
 | `pyserial` | Arduino serial communication |
-| `openai` | GPT-4o-mini AI reactions |
+| `openai` | GPT-4o AI reactions |
 | `python-dotenv` | Load `.env` config |
 | `safetext` | English profanity detection |
 
@@ -189,7 +189,7 @@ Drag the blue control points in the editor overlay to warp the projected image t
 
 - **Normal message** → white floating text on a random projector + pump pulse (duration scales with message length)
 - **Harmful message** → red shaking text + valve release (longer for longer messages)
-- **AI reaction** → GPT-4o-mini generates a blunt, short response displayed in the "THOUGHT" box on both projectors
+- **AI reaction** → GPT-4o generates a blunt, short response displayed in the "THOUGHT" box on both projectors
 
 ---
 
